@@ -110,7 +110,7 @@ class Arthur(object):
 
 
 def search(*args, **opts):
-    """Search the AUR for a given package"""
+    """Search the AUR for PACKAGE"""
     if args:
         Arthur(search=args, **opts).search()
     else:
@@ -124,7 +124,7 @@ search_options = [
     ('v', 'verbose', False, 'verbose output'),
     ('d', 'debug', False, 'do not actually query aur'),
 ]
-search_usage = '[package]'
+search_usage = '[options] PACKAGE'
 
 cmds = {
     '^search': (search, search_options, search_usage)
