@@ -8,6 +8,9 @@ import urlparse
 import json
 import sys
 import curses
+import os.path
+import glob
+import shutil
 
 class OutputFormatter(object):
     """Style the output of a command"""
@@ -65,13 +68,19 @@ class OutputFormatter(object):
 class Arthur(object):
 
     search_url = 'http://aur.archlinux.org/rpc.php?type=search&arg='
-    aur = 'http://aur.archlinux.org/rpc.php'
+    rpc_url = 'http://aur.archlinux.org/rpc.php'
+    aur_url = 'http://aur.archlinux.org'
 
-    def __init__(self, search=None, formatter=OutputFormatter(), **opts):
-        self.search_term = ' '.join(search) if search else search
-        self.segments = list(urlparse.urlsplit(self.aur))
+    def __init__(self, term=None, formatter=OutputFormatter(), **opts):
+        self.term = ' '.join(term) if term else term
+        self.segments = list(urlparse.urlsplit(self.rpc_url))
         self.debug = opts.get('debug', False)
         self.formatter = formatter
+
+    def aur(self, path):
+        segments = list(urlparse.urlsplit(self.aur_url))
+        segments[2] = path
+        return urlparse.urlunsplit(segments)
 
     def url(self, type, arg=None):
         data = {'type': type}
@@ -89,13 +98,12 @@ class Arthur(object):
             sys.exit(e.args)
 
     def search(self):
-        if not self.search_term:
+        if not self.term:
             sys.exit(1)
-        url = self.url('search', self.search_term)
-        print "search %s for %s" % (url, self.search_term)
+        url = self.url('search', self.term)
         response = self.decode(url)
         if response['type'] == 'error':
-            sys.exit('%s: %s' % (self.search_term, response['results']))
+            sys.exit('%s: %s' % (self.term, response['results']))
         packages = sorted(response['results'], key=lambda x: x['Name'])
         for package in packages:
             pkg_detail = "aur/%(Name)s %(Version)s (%(NumVotes)s)" % package
@@ -108,17 +116,37 @@ class Arthur(object):
             self.formatter('(%(NumVotes)s)' % package, fg='black', bg='yellow')
             self.formatter("%(Description)s" % package, indent="\t")
 
+    def download(self):
+        url = self.url('info', self.term)
+        response = self.decode(url)
+        if response['type'] == 'error':
+            sys.exit('%s: %s' % (self.term, response['results']))
+        pkg = response['results']
+        download_url = self.aur(pkg['URLPath'])
+        pkgpath = urlparse.urlparse(download_url).path
+        file_name = os.path.basename(pkgpath)
+        print file_name
+
+        response = urllib2.urlopen(download_url)
+        download = open(file_name, 'wb')
+        # download.write(response.
+        shutil.copyfileobj(response.fp, download)
+        download.close()
+
+    def in_local_db(self, pkg):
+        for repo in ['core', 'community', 'extra']:
+            path = os.path.join('/var/lib/pacman/sync', repo)
+            if glob.glob(os.path.join(path, pkg, '*')):
+                return repo
+        return False
 
 def search(*args, **opts):
     """Search the AUR for PACKAGE"""
     if args:
-        Arthur(search=args, **opts).search()
+        Arthur(term=args, **opts).search()
     else:
         usage = __file__ + ' search ' + search_usage
         help_cmd(search, usage, search_options)
-
-def install(*args, **opts):
-    pass
 
 search_options = [
     ('v', 'verbose', False, 'verbose output'),
@@ -126,8 +154,24 @@ search_options = [
 ]
 search_usage = '[options] PACKAGE'
 
+def download(*args, **opts):
+    """Download PACKAGE from the AUR"""
+    if args:
+        Arthur(term=args, **opts).download()
+    else:
+        usage = __file__ + ' download ' + download_usage
+        help_cmd(download, usage, download_options)
+
+download_options = [
+    ('v', 'verbose', False, 'verbose output'),
+    ('d', 'debug', False, 'do not actually query aur'),
+]
+download_usage = '[options] PACKAGE'
+
+
 cmds = {
-    '^search': (search, search_options, search_usage)
+    '^search': (search, search_options, search_usage),
+    '^download': (download, download_options, download_usage)
 }
 
 if __name__ == "__main__":
