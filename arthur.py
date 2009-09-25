@@ -11,6 +11,9 @@ import curses
 import os.path
 import glob
 import shutil
+import tarfile
+import re
+from itertools import chain
 
 class OutputFormatter(object):
     """Style the output of a command"""
@@ -125,13 +128,26 @@ class Arthur(object):
         download_url = self.aur(pkg['URLPath'])
         pkgpath = urlparse.urlparse(download_url).path
         file_name = os.path.basename(pkgpath)
-        print file_name
 
         response = urllib2.urlopen(download_url)
         download = open(file_name, 'wb')
-        # download.write(response.
         shutil.copyfileobj(response.fp, download)
         download.close()
+
+        for dep in self.parse(file_name):
+            print dep
+
+    def parse(self, file_name):
+        file = tarfile.open(file_name)
+        file.extractall()
+        pkgbuild = open(os.path.join(file_name.replace('.tar.gz', ''),
+                        'PKGBUILD')).read()
+        depends = re.findall('(?:make)?depends=\((.*?)\)', pkgbuild, re.S)
+        depends = chain(*[de.split() for de in depends])
+        depends = (de.strip("'") for de in depends if de != '\\')
+        for dep in depends:
+            yield re.match('(.[^=><]*)', dep).group()
+
 
     def in_local_db(self, pkg):
         for repo in ['core', 'community', 'extra']:
