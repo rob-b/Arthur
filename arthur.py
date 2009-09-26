@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-from opster import command
 from opster import help_cmd
 from opster import dispatch
 import urllib
@@ -24,7 +23,6 @@ class OutputFormatter(object):
 
     def __init__(self, str=None, color=''):
         import textwrap
-        import curses
 
         self.str = str
         self.wrapper = textwrap.TextWrapper()
@@ -102,7 +100,7 @@ class Arthur(object):
             return json.load(open('cache.json'))
         try:
             return json.loads(urllib2.urlopen(url).read())
-        except URLError, e:
+        except urllib2.URLError, e:
             sys.exit(e.args)
 
     def search(self):
@@ -129,10 +127,10 @@ class Arthur(object):
             # process this local file
             pkgbuild = self.extract_PKGBUILD(self.term)
             pacman, aur = self.find_dependencies(pkgbuild)
-            import ipdb; ipdb.set_trace();
+            for dep in aur:
+                Arthur(term=[dep]).download()
         else:
-            # dl the archive
-            pass
+            pacman, aur = self.download(self.term)
         sys.exit(1)
 
     def download(self, pkg=None):
@@ -154,19 +152,15 @@ class Arthur(object):
         pacman, aur = self.find_dependencies(pkgbuild)
         for dep in aur:
             Arthur(term=[dep]).download()
+        return pacman, aur
 
+
+    def temp_PKGBUILD(self, pkgbuild):
         # dump the pkgbuild to a temp file
         t = tempfile.NamedTemporaryFile()
         t.write(pkgbuild)
         t.seek(0)
-
-        # now we edit that file
-        t = self.edit_PKGBUILD(t)
-        print t.read()
-
-        # overwrite the real pkgbuild withthe contents of t
-        # run makepkg -s
-
+        return t
 
     def edit_PKGBUILD(self, fp):
         editor = os.getenv('EDITOR', 'vim')
