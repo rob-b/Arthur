@@ -9,11 +9,15 @@ import json
 import sys
 import curses
 import os.path
+import os
+from os.path import join
 import glob
 import shutil
 import tarfile
 import re
 from itertools import chain
+import subprocess
+import tempfile
 
 class OutputFormatter(object):
     """Style the output of a command"""
@@ -79,6 +83,7 @@ class Arthur(object):
         self.segments = list(urlparse.urlsplit(self.rpc_url))
         self.debug = opts.get('debug', False)
         self.formatter = formatter
+        self.path = opts.get('path')
 
     def aur(self, path):
         segments = list(urlparse.urlsplit(self.aur_url))
@@ -119,11 +124,23 @@ class Arthur(object):
             self.formatter('(%(NumVotes)s)' % package, fg='black', bg='yellow')
             self.formatter("%(Description)s" % package, indent="\t")
 
-    def download(self):
-        url = self.url('info', self.term)
+    def install(self):
+        if os.path.exists(self.term):
+            # process this local file
+            pkgbuild = self.extract_PKGBUILD(self.term)
+            pacman, aur = self.find_dependencies(pkgbuild)
+            import ipdb; ipdb.set_trace();
+        else:
+            # dl the archive
+            pass
+        sys.exit(1)
+
+    def download(self, pkg=None):
+        pkg = pkg if pkg is not None else self.term
+        url = self.url('info', pkg)
         response = self.decode(url)
         if response['type'] == 'error':
-            sys.exit('%s: %s' % (self.term, response['results']))
+            sys.exit('%s: %s' % (pkg, response['results']))
         pkg = response['results']
         download_url = self.aur(pkg['URLPath'])
         pkgpath = urlparse.urlparse(download_url).path
@@ -133,26 +150,60 @@ class Arthur(object):
         download = open(file_name, 'wb')
         shutil.copyfileobj(response.fp, download)
         download.close()
+        pkgbuild = self.extract_PKGBUILD(file_name)
+        pacman, aur = self.find_dependencies(pkgbuild)
+        for dep in aur:
+            Arthur(term=[dep]).download()
 
-        for dep in self.parse(file_name):
-            print dep
+        # dump the pkgbuild to a temp file
+        t = tempfile.NamedTemporaryFile()
+        t.write(pkgbuild)
+        t.seek(0)
 
-    def parse(self, file_name):
+        # now we edit that file
+        t = self.edit_PKGBUILD(t)
+        print t.read()
+
+        # overwrite the real pkgbuild withthe contents of t
+        # run makepkg -s
+
+
+    def edit_PKGBUILD(self, fp):
+        editor = os.getenv('EDITOR', 'vim')
+        subprocess.call('%s %s' % (editor, fp.name), shell=True)
+        return fp
+
+    def extract_PKGBUILD(self, file_name):
         file = tarfile.open(file_name)
         file.extractall()
-        pkgbuild = open(os.path.join(file_name.replace('.tar.gz', ''),
-                        'PKGBUILD')).read()
-        depends = re.findall('(?:make)?depends=\((.*?)\)', pkgbuild, re.S)
+        return open(join(file_name.replace('.tar.gz', ''),
+                    'PKGBUILD')).read()
+
+    def find_dependencies(self, pkgbuild):
+        pacman = []
+        aur = []
+        # for dep in self.find_dependencies(pkgbuild):
+        #     if self.in_sync(dep):
+        #         pacman.append(dep)
+        #     else:
+        #         aur.append(dep)
+        # print pacman, aur
+
+        depends = re.findall('[^opt](?:make)?depends=\((.*?)\)', pkgbuild, re.S)
         depends = chain(*[de.split() for de in depends])
         depends = (de.strip("'") for de in depends if de != '\\')
         for dep in depends:
-            yield re.match('(.[^=><]*)', dep).group()
+            match = re.match('(.[^=><]*)', dep).group()
+            if self.in_sync(match):
+                pacman.append(match)
+            else:
+                aur.append(match)
+        return pacman, aur
 
-
-    def in_local_db(self, pkg):
+    def in_sync(self, pkg):
         for repo in ['core', 'community', 'extra']:
-            path = os.path.join('/var/lib/pacman/sync', repo)
-            if glob.glob(os.path.join(path, pkg, '*')):
+            path = join('/var/lib/pacman/sync', repo)
+            if glob.glob(join(path, pkg+'-*')):
                 return repo
         return False
 
@@ -170,24 +221,25 @@ search_options = [
 ]
 search_usage = '[options] PACKAGE'
 
-def download(*args, **opts):
-    """Download PACKAGE from the AUR"""
+def install(*args, **opts):
+    """install PACKAGE from the AUR"""
     if args:
-        Arthur(term=args, **opts).download()
+        Arthur(term=args, **opts).install()
     else:
-        usage = __file__ + ' download ' + download_usage
-        help_cmd(download, usage, download_options)
+        usage = __file__ + ' install ' + install_usage
+        help_cmd(install, usage, install_options)
 
-download_options = [
+install_options = [
     ('v', 'verbose', False, 'verbose output'),
     ('d', 'debug', False, 'do not actually query aur'),
+    ('p', 'path', False, 'path to pkgbuil archive'),
 ]
-download_usage = '[options] PACKAGE'
+install_usage = '[options] PACKAGE'
 
 
 cmds = {
     '^search': (search, search_options, search_usage),
-    '^download': (download, download_options, download_usage)
+    '^install': (install, install_options, install_usage)
 }
 
 if __name__ == "__main__":
