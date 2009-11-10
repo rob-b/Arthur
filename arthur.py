@@ -8,7 +8,6 @@ import json
 import sys
 import curses
 import os.path
-import os
 from os.path import join
 import glob
 import shutil
@@ -168,8 +167,13 @@ class Arthur(object):
         return fp
 
     def extract_PKGBUILD(self, file_name):
-        file = tarfile.open(file_name)
-        file.extractall()
+        try:
+            file = tarfile.open(file_name)
+        except IOError, e:
+            if e.args[0] != 21:
+                raise e
+        else:
+            file.extractall()
         return open(join(file_name.replace('.tar.gz', ''),
                     'PKGBUILD')).read()
 
