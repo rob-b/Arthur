@@ -16,6 +16,9 @@ import re
 from itertools import chain
 import subprocess
 import tempfile
+from subprocess import Popen
+from subprocess import PIPE
+
 
 class OutputFormatter(object):
     """Style the output of a command"""
@@ -69,6 +72,19 @@ class OutputFormatter(object):
 
         self.render()
 
+def pacman_query(query):
+    print query
+    proc = Popen(query, shell=True, stdout=PIPE, stderr=PIPE)
+    out, error = proc.communicate()
+    return out.strip() or False
+
+def exists_locally(pkg):
+    return pacman_query('pacman -Q %s' % pkg)
+
+def exists_in_repo(pkg):
+    return pacman_query('pacman -Ssq %s' % pkg)
+
+
 class Arthur(object):
 
     search_url = 'http://aur.archlinux.org/rpc.php?type=search&arg='
@@ -81,6 +97,7 @@ class Arthur(object):
         self.debug = opts.get('debug', False)
         self.formatter = formatter
         self.path = opts.get('path')
+        self.search_title = opts.get('title')
 
     def aur(self, path):
         segments = list(urlparse.urlsplit(self.aur_url))
@@ -110,6 +127,8 @@ class Arthur(object):
         if response['type'] == 'error':
             sys.exit('%s: %s' % (self.term, response['results']))
         packages = sorted(response['results'], key=lambda x: x['Name'])
+        if self.search_title:
+            packages = [p for p in packages if self.term in p['Name']]
         for package in packages:
             pkg_detail = "aur/%(Name)s %(Version)s (%(NumVotes)s)" % package
             self.formatter('aur/', fg='magenta', separator='', style='bold')
@@ -130,6 +149,17 @@ class Arthur(object):
                 Arthur(term=[dep]).download()
         else:
             pacman, aur = self.download(self.term)
+
+        self.formatter('==>', fg='yellow', separator=' ')
+        self.formatter('%s dependencies' % self.term)
+        for dep in pacman:
+            if exists_locally(dep):
+                status = '(already installed)'
+                colour = 'normal'
+            elif exists_in_repo(dep):
+                status = '(package found)'
+                colour = 'blue'
+            self.formatter('%s %s' % (dep, status), fg=colour, indent=' - ')
         sys.exit(1)
 
     def download(self, pkg=None):
@@ -216,6 +246,7 @@ def search(*args, **opts):
 search_options = [
     ('v', 'verbose', False, 'verbose output'),
     ('d', 'debug', False, 'do not actually query aur'),
+    ('t', 'title', False, 'only query on package title; ignore the description'),
 ]
 search_usage = '[options] PACKAGE'
 
