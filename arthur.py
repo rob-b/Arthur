@@ -272,5 +272,6 @@ cmds = {
 }
 
 if __name__ == "__main__":
+    # let's go
     dispatch(cmdtable=cmds)
 
